@@ -50,7 +50,9 @@ class RAGTool(Tool):
 
 class Agent(Tool):
     tools: list[Tool] = []
+    memory: list[str] = []
     max_iterations: int = 5
+    max_memory: int = 10
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -64,17 +66,23 @@ class Agent(Tool):
     def act(self, query: str) -> str:
         print(f"Agent '{self.name}': {self.description}")
         print(f"Query: {query}")
-        print()
+
+        # Add query to memory
+        self.memory.append(f"Query: {query}")
+        self.memory = self.memory[-self.max_memory :]
 
         # Choose a tool based on the query
         iteration = 0
         while iteration + 1 < self.max_iterations:
-            print(f"Iteration {iteration + 1}/{self.max_iterations}")
+            print(f"\nIteration {iteration + 1}/{self.max_iterations}")
+
+            # Add memory context to query
+            context = "\n".join(self.memory)
 
             # Choose a tool to act
             response = client.models.generate_content(
                 model=self.model,
-                contents=query,
+                contents=context,
                 config=types.GenerateContentConfig(
                     system_instruction=f"You are an agent that chooses a tool to act on the query. Choose one of the following tools: {', '.join(tool.id() for tool in self.tools.values())}.",
                     tools=[
@@ -88,7 +96,7 @@ class Agent(Tool):
                                         "properties": {
                                             "query": {
                                                 "type": "string",
-                                                "description": "The query to use.",
+                                                "description": "The query and context to use.",
                                             },
                                         },
                                         "required": ["query"],
@@ -115,19 +123,20 @@ class Agent(Tool):
             print(f"- Using tool: {tool.name}")
             tool_response = tool.act(**tool_args)
 
+            # Add tool response to memory
+            self.memory.append(f"Tool: {tool.name}, Response: {tool_response}")
+            self.memory = self.memory[-self.max_memory :]
+
             # Check if response is final
             if tool.id() == "response_tool":
                 return tool_response
 
-            # Update query for next iteration
-            query = tool_response
-
         # If max iterations reached, return response tool's act
-        return self.tools["response_tool"].act(query)
+        return self.tools["response_tool"].act(context)
 
     def __str__(self):
         tools_str = [f"\n+  - {tool}" for tool in self.tools.values()]
-        return f"+ {self.name}: {self.description} (with max iterations: {self.max_iterations}){''.join(tools_str)}"
+        return f"+ {self.name}: {self.description} (with max iterations: {self.max_iterations}, max memory: {self.max_memory}){''.join(tools_str)}"
 
 
 if __name__ == "__main__":
@@ -146,8 +155,10 @@ if __name__ == "__main__":
         model=model_name,
         tools=[rag_tool],
         max_iterations=5,
+        max_memory=10,
     )
 
     # Act with the orchestrator agent
     response = orchestrator.act(query)
+    print("\n\nFinal Response:")
     print(response)
