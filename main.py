@@ -24,6 +24,10 @@ for doc_path in os.listdir(DATA_PATH):
         with pymupdf.open(os.path.join(DATA_PATH, doc_path)) as doc:
             for page in doc:
                 doc_pages[doc_path].append(page.get_text())
+# TODO - Summarize or compress pages
+# TODO - Filter out irrelevant content (e.g. headers, page numbers, etc.)
+# TODO - Chunk documents into relevant sections (instead of using full pages)
+# TODO - Add image embedding support
 
 # Create a document collection
 collection = chroma_client.create_collection(name="regulatory_docs")
@@ -119,6 +123,7 @@ class RAGTool(Tool):
                 system_instruction=f"You are a {self.name}. {self.description}",
             ),
         )
+        # TODO - Structure output to allow doc page redirections
 
         return response.text
 
@@ -139,9 +144,6 @@ class Agent(Tool):
         self.tools: dict[str, Tool] = {tool.id(): tool for tool in self.tools}
 
     def act(self, query: str) -> str:
-        print(f"Query: {query}")
-        print(f"\nAgent '{self.name}': {self.description}")
-
         # Add query to memory
         self.memory.append(f"Query: {query}")
         self.memory = self.memory[-self.max_memory :]
@@ -149,10 +151,14 @@ class Agent(Tool):
         # Choose a tool based on the query
         iteration = 0
         while iteration + 1 < self.max_iterations:
-            print(f"\nIteration {iteration + 1}/{self.max_iterations}")
+            print()
+            print(f"+ ------------- +")
+            print(f"| Iteration {iteration + 1}/{self.max_iterations} |")
+            print(f"+ ------------- +\n")
 
             # Add memory context to query
             context = "\n".join(self.memory)
+            # TODO - Add planning/reasoning prompting
 
             # Choose a tool to act
             response = gemini_client.models.generate_content(
@@ -186,14 +192,15 @@ class Agent(Tool):
                 continue
 
             # Act with chosen tool
-            print(f" Response: {function_call.name} {function_call.args}")
+            print(f"Tool: {function_call.name} {function_call.args}")
             tool = self.tools.get(function_call.name)
             tool_response = tool.act(**function_call.args)
-            print(f"+- Tool response: {tool_response}")
+            print(f"\n{tool_response}")
 
             # Add tool response to memory
             self.memory.append(f"Tool: {tool.name}, Response: {tool_response}")
             self.memory = self.memory[-self.max_memory :]
+            # TODO - Add memory selection/compression/isolation
 
             # Check if response is final
             if tool.id() == "response_tool":
@@ -208,11 +215,12 @@ class Agent(Tool):
 
 
 if __name__ == "__main__":
-    # TODO - Define variables - #
+    # TODO - General: Use prompt engineering/templates to improve agent performance
+    
+    # Define variables - #
     model_name = "gemini-2.5-flash"
-    query = "What documentation is needed for a mobile app that monitors heart rate?"
     query = "What are the design control requirements for verification and validation?"
-    # ------------------------- #
+    # ------------------ #
 
     # Define agents & tools
     rag_tool = RAGTool(
@@ -223,11 +231,21 @@ if __name__ == "__main__":
         description="Answers regulatory queries by retrieving relevant documents and generating responses.",
         model=model_name,
         tools=[rag_tool],
-        max_iterations=2,
+        max_iterations=5,
         max_memory=10,
     )
+    
+    print()
+    print(f"+ ----- +")
+    print(f"| Query |")
+    print(f"+ ----- +\n")
+    print(query)
 
     # Act with the orchestrator agent
     response = orchestrator.act(query)
-    print("\n\nFinal Response:")
+    
+    print()
+    print(f"+ -------------- +")
+    print(f"| Final Response |")
+    print(f"+ -------------- +\n")
     print(response)
