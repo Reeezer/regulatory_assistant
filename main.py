@@ -166,12 +166,16 @@ class Agent(Tool):
                 contents=context,
                 config=types.GenerateContentConfig(
                     system_instruction=f"""
-                        You are a {self.title}. {self.description}
+                        You are a reasoning and planning {self.title}. {self.description}
                     
                         Choose one of the following tools: {', '.join(tool.id() for tool in self.tools.values())}. 
                         When calling a tool, always provide all required parameters. 
-                        
-                        Example: {{'name': 'rag_tool', 'args': {{'query': 'example', 'n_results': 3}}}}""",
+
+                        Use this output format:
+                        Thought: I need to look for relevant documents.
+                        Plan: Use the rag_tool to retrieve relevant documents.
+                        Action: {{'name': 'rag_tool', 'parameters': {{'query': '<query>', 'n_results': <n_results>}}}}                                  
+                        """,
                     tools=[
                         types.Tool(
                             function_declarations=[
@@ -227,8 +231,6 @@ class Agent(Tool):
 
 
 if __name__ == "__main__":
-    # TODO - General: Use prompt engineering/templates to improve agent performance
-
     # Define variables - #
     MODEL_NAME = "gemini-2.5-flash"
     QUERY = "What are the design control requirements for verification and validation?"
