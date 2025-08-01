@@ -23,7 +23,7 @@ for doc_path in os.listdir(DATA_PATH):
     if doc_path.endswith(".pdf"):
         with pymupdf.open(os.path.join(DATA_PATH, doc_path)) as doc:
             for page in doc:
-                doc_pages[doc_path].append(page.get_text())
+                doc_pages[doc_path].append(str(page.get_text()).strip())
 # TODO - Summarize or compress pages
 # TODO - Filter out irrelevant content (e.g. headers, page numbers, etc.)
 # TODO - Chunk documents into relevant sections (instead of using full pages)
@@ -50,6 +50,8 @@ class Tool(BaseModel):
     description: str
     model: str
 
+    num_tokens: int = 0
+
     parameters: dict = {
         "query": {
             "type": "string",
@@ -67,6 +69,9 @@ class Tool(BaseModel):
     def id(self) -> str:
         return self.name.lower().replace(" ", "_")
 
+    def count_tokens(self) -> int:
+        return self.num_tokens
+
 
 class ResponseTool(Tool):
     name: str = "Response Tool"
@@ -82,6 +87,7 @@ class ResponseTool(Tool):
                 system_instruction=f"You are a {self.name}. {self.description}\nGenerate a concise and informative response.",
             ),
         )
+        self.num_tokens += response.usage_metadata.total_token_count
         return response.text
 
 
@@ -184,15 +190,18 @@ class Agent(Tool):
                     ],
                 ),
             )
+            self.num_tokens += response.usage_metadata.total_token_count
             iteration += 1
 
             # Check validity of response
+            if not response.candidates:
+                continue
             function_call = response.candidates[0].content.parts[0].function_call
             if not function_call:
                 continue
 
             # Act with chosen tool
-            print(f"Tool: {function_call.name} {function_call.args}")
+            print(f"[Tokens: {response.usage_metadata.total_token_count}] Tool: {function_call.name} {function_call.args}")
             tool = self.tools.get(function_call.name)
             tool_response = tool.act(**function_call.args)
             print(f"\n{tool_response}")
@@ -212,6 +221,9 @@ class Agent(Tool):
     def __str__(self):
         tools_str = [f"\n+  - {tool}" for tool in self.tools.values()]
         return f"+ {self.name}: {self.description} (with max iterations: {self.max_iterations}, max memory: {self.max_memory}){''.join(tools_str)}"
+
+    def count_tokens(self) -> int:
+        return self.num_tokens + sum(tool.count_tokens() for tool in self.tools.values())
 
 
 if __name__ == "__main__":
@@ -257,5 +269,6 @@ if __name__ == "__main__":
     print()
     print(f"+ -------------------- +")
     print(f"| Final Response       |")
-    print(f"+ -------------------- +\n")
+    print(f"+ -------------------- +")
+    print(f"Total tokens: {orchestrator.count_tokens()}\n")
     print(response)
