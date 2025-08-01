@@ -87,13 +87,13 @@ class ResponseTool(Tool):
 
 class RAGTool(Tool):
     name: str = "RAG Tool"
-    description: str = "Generates a response using the documents retrieved from the collection. Give the source and page number of the documents used."
+    description: str = "Retrieves relevant documents from the collection based on the query."
     model: str
 
     parameters: dict = {
         "query": {
             "type": "string",
-            "description": "The query to search for in the document collection.",
+            "description": "The query to search for in the document collection. This should be a concise question or statement describing the information needed.",
         },
         "n_results": {
             "type": "integer",
@@ -116,19 +116,13 @@ class RAGTool(Tool):
 
         # Generate a response using the retrieved documents
         results_str = "\n\n".join([f"Document source: {doc_metadata['source']}, Page num: {doc_metadata['page']}\n{doc_content}" for doc_metadata, doc_content in zip(results["metadatas"][0], results["documents"][0])])
-        response = gemini_client.models.generate_content(
-            model=self.model,
-            contents=results_str,
-            config=types.GenerateContentConfig(
-                system_instruction=f"You are a {self.name}. {self.description}",
-            ),
-        )
         # TODO - Structure output to allow doc page redirections
 
-        return response.text
+        return results_str
 
 
 class Agent(Tool):
+    title: str
     tools: list[Tool] = []
     memory: list[str] = []
     max_iterations: int = 5
@@ -152,20 +146,26 @@ class Agent(Tool):
         iteration = 0
         while iteration + 1 < self.max_iterations:
             print()
-            print(f"+ ------------- +")
-            print(f"| Iteration {iteration + 1}/{self.max_iterations} |")
-            print(f"+ ------------- +\n")
+            print(f"+ -------------------- +")
+            print(f"| [{self.title}] {(17 - len(self.title)) * ' '} |")
+            print(f"| Iteration {iteration + 1}/{self.max_iterations}        |")
+            print(f"+ -------------------- +\n")
 
             # Add memory context to query
             context = "\n".join(self.memory)
-            # TODO - Add planning/reasoning prompting
 
             # Choose a tool to act
             response = gemini_client.models.generate_content(
                 model=self.model,
                 contents=context,
                 config=types.GenerateContentConfig(
-                    system_instruction=f"You are an agent that chooses a tool to act on the query. Choose one of the following tools: {', '.join(tool.id() for tool in self.tools.values())}. When calling a tool, always provide all required parameters. Example: {{'name': 'rag_tool', 'args': {{'query': 'example', 'n_results': 3}}}}",
+                    system_instruction=f"""
+                        You are a {self.title}. {self.description}
+                    
+                        Choose one of the following tools: {', '.join(tool.id() for tool in self.tools.values())}. 
+                        When calling a tool, always provide all required parameters. 
+                        
+                        Example: {{'name': 'rag_tool', 'args': {{'query': 'example', 'n_results': 3}}}}""",
                     tools=[
                         types.Tool(
                             function_declarations=[
@@ -200,7 +200,7 @@ class Agent(Tool):
             # Add tool response to memory
             self.memory.append(f"Tool: {tool.name}, Response: {tool_response}")
             self.memory = self.memory[-self.max_memory :]
-            # TODO - Add memory selection/compression/isolation
+            # TODO - Add memory selection/compression/isolation (see https://rlancemartin.github.io/2025/06/23/context_engineering/)
 
             # Check if response is final
             if tool.id() == "response_tool":
@@ -216,36 +216,46 @@ class Agent(Tool):
 
 if __name__ == "__main__":
     # TODO - General: Use prompt engineering/templates to improve agent performance
-    
+
     # Define variables - #
-    model_name = "gemini-2.5-flash"
-    query = "What are the design control requirements for verification and validation?"
+    MODEL_NAME = "gemini-2.5-flash"
+    QUERY = "What are the design control requirements for verification and validation?"
+    MAX_ITERATIONS = 5
+    MAX_MEMORY = 10
     # ------------------ #
 
     # Define agents & tools
-    rag_tool = RAGTool(
-        model=model_name,
+    rag_tool = RAGTool(model=MODEL_NAME)
+    rag_agent = Agent(
+        title="RAG",
+        name="RAG Agent",
+        description="Retrieves relevant documents from the collection and generates a response.",
+        model=MODEL_NAME,
+        tools=[rag_tool],
+        max_iterations=MAX_ITERATIONS,
+        max_memory=MAX_MEMORY,
     )
     orchestrator = Agent(
+        title="Orchestrator",
         name="Regulatory Assistant",
         description="Answers regulatory queries by retrieving relevant documents and generating responses.",
-        model=model_name,
-        tools=[rag_tool],
-        max_iterations=5,
-        max_memory=10,
+        model=MODEL_NAME,
+        tools=[rag_agent],
+        max_iterations=MAX_ITERATIONS,
+        max_memory=MAX_MEMORY,
     )
-    
+
     print()
-    print(f"+ ----- +")
-    print(f"| Query |")
-    print(f"+ ----- +\n")
-    print(query)
+    print(f"+ -------------------- +")
+    print(f"| Query                |")
+    print(f"+ -------------------- +\n")
+    print(QUERY)
 
     # Act with the orchestrator agent
-    response = orchestrator.act(query)
-    
+    response = orchestrator.act(QUERY)
+
     print()
-    print(f"+ -------------- +")
-    print(f"| Final Response |")
-    print(f"+ -------------- +\n")
+    print(f"+ -------------------- +")
+    print(f"| Final Response       |")
+    print(f"+ -------------------- +\n")
     print(response)
